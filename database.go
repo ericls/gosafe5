@@ -62,11 +62,13 @@ type DatabaseUpdate struct {
 
 // LocalDatabase holds named hash lists in memory. Its zero value is ready for
 // use. Methods are safe for concurrent calls; do not copy it after first use.
-// It performs no fetching, persistence, retries, or automatic expiry. Callers
+// Persistence is explicit through Save and LoadDatabase. It performs no fetching,
+// retries, or automatic expiry. Callers
 // select lists and decide whether stored data is suitable for live lookups.
 type LocalDatabase struct {
-	mu    sync.RWMutex
-	lists map[string]ListState
+	saveMu sync.Mutex // Serializes snapshots and writes from this instance.
+	mu     sync.RWMutex
+	lists  map[string]ListState
 }
 
 // Get returns a detached snapshot, or false when name has not been loaded.

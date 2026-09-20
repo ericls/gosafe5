@@ -14,12 +14,35 @@ This is not an official client.
 ## Project status
 - [x] Stateless primitives: URL hashing, Rice encoding/decoding, hash list management.
 - [x] In-memory local database: named lists, versioned updates, metadata, lookup, and update timing.
-- [ ] Local list persistence and background synchronization.
+- [x] Snapshot persistence with a pluggable backend and filesystem implementation.
+- [x] Mockable v5 API layer: protobuf transport, list discovery/downloads, and hash-prefix searches.
+- [ ] Background synchronization.
 - [ ] HTTP server: serving `/v5/urls:search` endpoints, with JSON support. (JSON is not supported in from `https://safebrowsing.googleapis.com/v5/urls:search` yet.)
 
 ## Development
 
 Requires Go 1.24.5 or later.
+
+## API layer
+
+Construct `NewHTTPAPI(APIConfig{APIKey: key})` and depend on the `API` interface
+in application code. It provides `ListHashLists`, `GetHashList`,
+`BatchGetHashLists`, and `SearchHashes`. Tests can implement the interface with
+ordinary Go values, without an HTTP server or protobuf dependency.
+
+Requests use HTTP GET query parameters and `alt=proto`; responses are decoded
+as binary protobuf, with no JSON fallback. List downloads return decoded
+`DatabaseUpdate` values for `LocalDatabase.Apply`. Supply the expected hash width
+and current opaque version in `HashListRequest`. Discovery exposes pagination
+explicitly through `NextPageToken`.
+
+The transport supports context cancellation, configurable HTTP clients and
+response/decode limits, and typed HTTP errors with `RetryAfter`. It does not
+retry, cache, or apply updates automatically. Hash results retain cache durations
+and enforcement attributes; details containing unknown enums are discarded.
+
+Private generated protobuf types are checked in. To regenerate them, install
+`protoc` 29.3 and `protoc-gen-go` v1.35.1, then run `go generate ./internal/sbproto`.
 
 ## Protocol references
 

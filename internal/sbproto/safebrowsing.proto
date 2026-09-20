@@ -1,0 +1,75 @@
+// Wire-compatible message subset of the public Google Safe Browsing v5 schema:
+// https://github.com/googleapis/googleapis/blob/master/google/security/safebrowsing/v5/safebrowsing.proto
+// Field numbers and scalar types follow that schema. HTTP annotations, services,
+// and request messages are omitted; requests use HTTP GET query parameters.
+syntax = "proto3";
+package gosafe5.wire.v5;
+option go_package = "github.com/ericls/gosafe5/internal/sbproto";
+import "google/protobuf/duration.proto";
+
+message SearchHashesResponse {
+  repeated FullHash full_hashes = 1;
+  google.protobuf.Duration cache_duration = 2;
+}
+message FullHash {
+  bytes full_hash = 1;
+  repeated FullHashDetail full_hash_details = 2;
+}
+message FullHashDetail {
+  int32 threat_type = 1;
+  repeated int32 attributes = 2;
+}
+message RiceDeltaEncoded32Bit {
+  uint32 first_value = 1;
+  int32 rice_parameter = 2;
+  int32 entries_count = 3;
+  bytes encoded_data = 4;
+}
+message RiceDeltaEncoded64Bit {
+  uint64 first_value = 1;
+  int32 rice_parameter = 2;
+  int32 entries_count = 3;
+  bytes encoded_data = 4;
+}
+message RiceDeltaEncoded128Bit {
+  uint64 first_value_hi = 1;
+  fixed64 first_value_lo = 2;
+  int32 rice_parameter = 3;
+  int32 entries_count = 4;
+  bytes encoded_data = 5;
+}
+message RiceDeltaEncoded256Bit {
+  uint64 first_value_first_part = 1;
+  fixed64 first_value_second_part = 2;
+  fixed64 first_value_third_part = 3;
+  fixed64 first_value_fourth_part = 4;
+  int32 rice_parameter = 5;
+  int32 entries_count = 6;
+  bytes encoded_data = 7;
+}
+message HashListMetadata {
+  repeated int32 threat_types = 1;
+  repeated int32 likely_safe_types = 2;
+  string description = 4;
+  int32 hash_length = 6;
+}
+message HashList {
+  string name = 1;
+  bytes version = 2;
+  bool partial_update = 3;
+  oneof compressed_additions {
+    RiceDeltaEncoded32Bit additions_four_bytes = 4;
+    RiceDeltaEncoded64Bit additions_eight_bytes = 9;
+    RiceDeltaEncoded128Bit additions_sixteen_bytes = 10;
+    RiceDeltaEncoded256Bit additions_thirty_two_bytes = 11;
+  }
+  RiceDeltaEncoded32Bit compressed_removals = 5;
+  google.protobuf.Duration minimum_wait_duration = 6;
+  bytes sha256_checksum = 7;
+  HashListMetadata metadata = 8;
+}
+message BatchGetHashListsResponse { repeated HashList hash_lists = 1; }
+message ListHashListsResponse {
+  repeated HashList hash_lists = 1;
+  string next_page_token = 2;
+}
