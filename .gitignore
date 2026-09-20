@@ -1,0 +1,34 @@
+# Go binaries, test executables, and build output.
+/bin/
+/dist/
+*.exe
+*.exe~
+*.test
+
+# Coverage and profiling output.
+/coverage/
+/coverage.out
+/coverage.html
+*.prof
+*.pprof
+
+# Local Go workspace files; go.mod and go.sum belong in version control.
+/go.work
+/go.work.sum
+
+# Local configuration and API keys; keep example configuration trackable.
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Editor and OS files.
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Keep testdata/, including Go fuzz regression cases, in version control.
