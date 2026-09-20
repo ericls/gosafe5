@@ -13,7 +13,8 @@ This is not an official client.
 
 ## Project status
 - [x] Stateless primitives: URL hashing, Rice encoding/decoding, hash list management.
-- [ ] Local list: storage, update, and lookup.
+- [x] In-memory local database: named lists, versioned updates, metadata, lookup, and update timing.
+- [ ] Local list persistence and background synchronization.
 - [ ] HTTP server: serving `/v5/urls:search` endpoints, with JSON support. (JSON is not supported in from `https://safebrowsing.googleapis.com/v5/urls:search` yet.)
 
 ## Development
