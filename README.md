@@ -1,5 +1,7 @@
 # gosafe5
 
+[![CI](https://github.com/ericls/gosafe5/actions/workflows/ci.yml/badge.svg)](https://github.com/ericls/gosafe5/actions/workflows/ci.yml)
+
 `gosafe5` is a Go client/server for [Google Safe Browsing v5](https://developers.google.com/safe-browsing/reference), currently in early
 development. Its goal is functional parity with
 [`google/safebrowsing`](https://github.com/google/safebrowsing), especially its
