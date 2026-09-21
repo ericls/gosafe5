@@ -18,6 +18,13 @@ import (
 	"github.com/ericls/gosafe5/httpserver"
 )
 
+// Set via -ldflags at build time (see .goreleaser.yaml).
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 func main() {
 	flag.Usage = func() {
 		out := flag.CommandLine.Output()
@@ -41,7 +48,13 @@ Flags:
 	snapshot := flag.String("snapshot", "", "optional snapshot file (parent directory must exist)")
 	capacity := flag.Int("cache-capacity", 10_000, "prefix cache capacity; negative disables caching")
 	logLevel := flag.String("log-level", "info", "log level: debug, info, warn, or error")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("sbserver %s (commit %s, built %s)\n", version, commit, date)
+		return
+	}
 
 	level, err := parseLogLevel(*logLevel)
 	if err != nil {
