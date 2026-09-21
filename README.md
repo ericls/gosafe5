@@ -17,7 +17,8 @@ This is not an official client.
 - [x] Snapshot persistence with a pluggable backend and filesystem implementation.
 - [x] Mockable v5 API layer: protobuf transport, list discovery/downloads, and hash-prefix searches.
 - [x] Managed lists: background synchronization, retry/recovery, health, and automatic persistence.
-- [ ] HTTP server: serving `/v5/urls:search` endpoints, with JSON support. (JSON is not supported in from `https://safebrowsing.googleapis.com/v5/urls:search` yet.)
+- [x] URL checking with local-list and real-time modes, shared prefix-response caching, and a JSON `/v5/urls:search` server.
+
 
 ## Development
 
@@ -25,6 +26,14 @@ Requires Go 1.24.5 or later.
 
 Private generated protobuf types are checked in. To regenerate them, install
 `protoc` 29.3 and `protoc-gen-go` v1.35.1, then run `go generate ./internal/sbproto`.
+
+### Server
+
+Set `SAFE_BROWSING_API_KEY` in the environment, then run:
+
+```sh
+go run ./cmd/sbserver -snapshot ./safebrowsing.snapshot
+```
 
 ## Protocol references
 

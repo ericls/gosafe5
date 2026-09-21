@@ -1,6 +1,7 @@
 # Go binaries, test executables, and build output.
 /bin/
 /dist/
+/sbserver
 *.exe
 *.exe~
 *.test
@@ -21,6 +22,10 @@
 .env.*
 !.env.example
 !.env.*.example
+
+# Default local Safe Browsing snapshot and atomic-save temporary files.
+/safebrowsing.snapshot
+/.gosafe5-*
 
 # Editor and OS files.
 .idea/
