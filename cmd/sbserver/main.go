@@ -5,7 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -24,49 +24,82 @@ func main() {
 	names := flag.String("threat-lists", "mw-4b,se-4b,uws-4b", "comma-separated documented threat list names")
 	snapshot := flag.String("snapshot", "", "optional snapshot file (parent directory must exist)")
 	capacity := flag.Int("cache-capacity", 10_000, "prefix cache capacity; negative disables caching")
+	logLevel := flag.String("log-level", "info", "log level: debug, info, warn, or error")
 	flag.Parse()
+
+	level, err := parseLogLevel(*logLevel)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+
 	if flag.NArg() != 0 {
-		log.Fatal("unexpected positional arguments")
+		logger.Error("unexpected positional arguments")
+		os.Exit(1)
 	}
 	if !sb.SearchMode(*mode).Valid() {
-		log.Fatal("invalid mode")
+		logger.Error("invalid mode")
+		os.Exit(1)
 	}
 	lists, threatNames, err := selectedLists(*names)
 	if err != nil {
-		log.Fatal(err)
+		logger.Error(err.Error())
+		os.Exit(1)
 	}
-	api, err := sb.NewHTTPAPI(sb.APIConfig{APIKey: os.Getenv("SAFE_BROWSING_API_KEY")})
+	api, err := sb.NewHTTPAPI(sb.APIConfig{APIKey: os.Getenv("SAFE_BROWSING_API_KEY"), Logger: logger})
 	if err != nil {
-		log.Fatal(err)
+		logger.Error(err.Error())
+		os.Exit(1)
 	}
-	config := sb.UpdaterConfig{API: api, Lists: lists}
+	config := sb.UpdaterConfig{API: api, Lists: lists, Logger: logger}
 	if *snapshot != "" {
 		config.Store = sb.FileStore{Path: *snapshot}
 	}
 	updater, err := sb.NewListUpdater(config)
 	if err != nil {
-		log.Fatal(err)
+		logger.Error(err.Error())
+		os.Exit(1)
 	}
 	checker, err := sb.NewURLChecker(sb.URLCheckerConfig{
-		API: api, Lists: updater, ThreatLists: threatNames, CacheCapacity: *capacity,
-		Diagnostic: func(d sb.SearchDiagnostic) { log.Printf("search mode=%s event=%s", d.Mode, d.Event) },
+		API: api, Lists: updater, ThreatLists: threatNames, CacheCapacity: *capacity, Logger: logger,
+		Diagnostic: func(d sb.SearchDiagnostic) { logger.Debug("search", "mode", d.Mode, "event", d.Event) },
 	})
 	if err != nil {
-		log.Fatal(err)
+		logger.Error(err.Error())
+		os.Exit(1)
 	}
-	handler, err := httpserver.NewHandler(httpserver.Config{Checker: checker, DefaultMode: sb.SearchMode(*mode)})
+	handler, err := httpserver.NewHandler(httpserver.Config{Checker: checker, DefaultMode: sb.SearchMode(*mode), Logger: logger})
 	if err != nil {
-		log.Fatal(err)
+		logger.Error(err.Error())
+		os.Exit(1)
 	}
 	listener, err := net.Listen("tcp", *listen)
 	if err != nil {
-		log.Fatal(err)
+		logger.Error(err.Error())
+		os.Exit(1)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	log.Printf("sbserver listening on %s (default mode=%s)", listener.Addr(), *mode)
+	logger.Info("sbserver listening", "addr", listener.Addr(), "mode", *mode)
 	if err := serve(ctx, listener, handler, updater); err != nil {
-		log.Fatal(err)
+		logger.Error(err.Error())
+		os.Exit(1)
+	}
+}
+
+func parseLogLevel(s string) (slog.Level, error) {
+	switch strings.ToLower(s) {
+	case "debug":
+		return slog.LevelDebug, nil
+	case "info":
+		return slog.LevelInfo, nil
+	case "warn":
+		return slog.LevelWarn, nil
+	case "error":
+		return slog.LevelError, nil
+	default:
+		return 0, fmt.Errorf("invalid -log-level %q: must be debug, info, warn, or error", s)
 	}
 }
 

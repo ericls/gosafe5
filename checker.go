@@ -3,6 +3,7 @@ package gosafe5
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sort"
 	"time"
 )
@@ -38,6 +39,7 @@ type URLCheckerConfig struct {
 	GlobalCacheList string                 // Default gc-32b.
 	CacheCapacity   int                    // Default 10,000 prefixes; negative disables caching.
 	Diagnostic      func(SearchDiagnostic) // Optional; must be concurrency-safe.
+	Logger          *slog.Logger           // Defaults to slog.Default().
 }
 
 type URLThreat struct {
@@ -53,11 +55,15 @@ type URLChecker struct {
 	config URLCheckerConfig
 	cache  *prefixCache
 	now    func() time.Time
+	logger *slog.Logger
 }
 
 func NewURLChecker(c URLCheckerConfig) (*URLChecker, error) {
 	if c.API == nil || c.Lists == nil || len(c.ThreatLists) == 0 {
 		return nil, fmt.Errorf("%w: API, lists and threat list names required", ErrInvalidAPIRequest)
+	}
+	if c.Logger == nil {
+		c.Logger = slog.Default()
 	}
 	if c.GlobalCacheList == "" {
 		c.GlobalCacheList = "gc-32b"
@@ -73,7 +79,8 @@ func NewURLChecker(c URLCheckerConfig) (*URLChecker, error) {
 	if c.CacheCapacity == 0 {
 		c.CacheCapacity = 10_000
 	}
-	return &URLChecker{config: c, cache: newPrefixCache(c.CacheCapacity), now: time.Now}, nil
+	return &URLChecker{config: c, cache: newPrefixCache(c.CacheCapacity), now: time.Now,
+		logger: c.Logger.With("component", "gosafe5.checker")}, nil
 }
 
 // ValidateSearchURLs validates the entire input without exposing URL text in errors.
@@ -100,6 +107,7 @@ func searchURLHashes(urls []string) ([][]Hash, error) {
 // SearchURLs checks top-level navigations. Caller cancellation is never fail-open.
 // Missing required local lists return ErrNotReady, not a safe verdict.
 func (c *URLChecker) SearchURLs(ctx context.Context, urls []string, mode SearchMode) (URLSearchResult, error) {
+	c.logger.DebugContext(ctx, "SearchURLs", "mode", mode, "urls", len(urls))
 	result := URLSearchResult{Threats: []URLThreat{}}
 	if !mode.Valid() {
 		return result, fmt.Errorf("%w: invalid search mode", ErrInvalidAPIRequest)
@@ -214,7 +222,11 @@ func (c *URLChecker) check(ctx context.Context, hashes []Hash, local bool, lists
 	}
 	for start := 0; start < len(prefixes); start += 30 {
 		batch := prefixes[start:min(start+30, len(prefixes))]
+		c.logger.DebugContext(ctx, "SearchHashes", "prefixes", len(batch))
 		response, err := c.config.API.SearchHashes(ctx, batch)
+		if err != nil {
+			c.logger.DebugContext(ctx, "SearchHashes failed", "prefixes", len(batch), "error", err)
+		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}

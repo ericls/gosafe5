@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"time"
@@ -21,9 +22,13 @@ type Config struct {
 	Checker       URLSearcher
 	DefaultMode   sb.SearchMode // Defaults to local-list.
 	SearchTimeout time.Duration // Defaults to 30 seconds.
+	Logger        *slog.Logger  // Defaults to slog.Default().
 }
 
-type Handler struct{ config Config }
+type Handler struct {
+	config Config
+	logger *slog.Logger
+}
 
 func NewHandler(c Config) (*Handler, error) {
 	if c.DefaultMode == "" {
@@ -32,13 +37,17 @@ func NewHandler(c Config) (*Handler, error) {
 	if c.SearchTimeout == 0 {
 		c.SearchTimeout = 30 * time.Second
 	}
+	if c.Logger == nil {
+		c.Logger = slog.Default()
+	}
 	if c.Checker == nil || !c.DefaultMode.Valid() || c.SearchTimeout < 0 {
 		return nil, fmt.Errorf("%w: invalid handler configuration", sb.ErrInvalidAPIRequest)
 	}
-	return &Handler{c}, nil
+	return &Handler{config: c, logger: c.Logger.With("component", "httpserver")}, nil
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.logger.DebugContext(r.Context(), "request", "method", r.Method, "path", r.URL.Path)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	if r.URL.Path != "/v5/urls:search" {
@@ -68,6 +77,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, err.Error())
 		return
 	}
+	h.logger.DebugContext(r.Context(), "search", "mode", mode, "urls", len(urls))
 	ctx, cancel := context.WithTimeout(r.Context(), h.config.SearchTimeout)
 	defer cancel()
 	result, err := h.config.Checker.SearchURLs(ctx, urls, mode)
@@ -84,6 +94,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		default:
 			writeError(w, 503, "search unavailable")
 		}
+		h.logger.DebugContext(r.Context(), "search failed", "mode", mode, "error", err)
 		return
 	}
 	type threat struct {
@@ -97,6 +108,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for _, t := range result.Threats {
 		response.Threats = append(response.Threats, threat{t.URL, t.ThreatTypes})
 	}
+	h.logger.DebugContext(r.Context(), "search complete", "mode", mode, "threats", len(response.Threats))
 	_ = json.NewEncoder(w).Encode(response)
 }
 

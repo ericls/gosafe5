@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"math/rand/v2"
 	"net/http"
 	"sort"
@@ -32,6 +33,7 @@ type UpdaterConfig struct {
 	RequestTimeout   time.Duration // Default 30 seconds, also used for store I/O.
 	RetryInitial     time.Duration // Default 1 second.
 	RetryMax         time.Duration // Default 15 minutes.
+	Logger           *slog.Logger  // Defaults to slog.Default().
 }
 
 type ListUpdateStatus struct {
@@ -71,6 +73,7 @@ type ListUpdater struct {
 	saveFailures uint
 	clock        updaterClock
 	jitter       func(time.Duration) time.Duration
+	logger       *slog.Logger
 }
 
 type updaterClock interface {
@@ -114,6 +117,9 @@ func NewListUpdater(c UpdaterConfig) (*ListUpdater, error) {
 	if c.MaxSnapshotBytes < 0 || c.RequestTimeout < 0 || c.RetryInitial < 0 || c.RetryMax < c.RetryInitial {
 		return nil, fmt.Errorf("%w: updater limits", ErrInvalidAPIRequest)
 	}
+	if c.Logger == nil {
+		c.Logger = slog.Default()
+	}
 	selected := make([]HashListInfo, len(c.Lists))
 	names := map[string]bool{}
 	for i, l := range c.Lists {
@@ -133,7 +139,7 @@ func NewListUpdater(c UpdaterConfig) (*ListUpdater, error) {
 		jitter: func(d time.Duration) time.Duration {
 			half := d / 2
 			return half + time.Duration(rand.Int64N(int64(d-half)+1))
-		}}
+		}, logger: c.Logger.With("component", "gosafe5.updater")}
 	for _, l := range selected {
 		u.status.Lists = append(u.status.Lists, ListUpdateStatus{Name: l.Name})
 	}
@@ -223,18 +229,25 @@ func (u *ListUpdater) Run(ctx context.Context) error {
 		return err
 	}
 	defer u.leave()
+	u.logger.Info("updater starting")
 	if err := u.initialize(ctx); err != nil {
+		u.logger.Error("updater initialization failed", "error", err)
 		return err
 	}
 	for {
 		if err := ctx.Err(); err != nil {
+			u.logger.Info("updater stopping", "error", err)
 			return err
 		}
 		u.cycle(ctx)
 		if err := ctx.Err(); err != nil {
+			u.logger.Info("updater stopping", "error", err)
 			return err
 		}
-		if err := u.clock.Wait(ctx, u.nextDelay()); err != nil {
+		delay := u.nextDelay()
+		u.logger.Debug("updater sleeping", "delay", delay)
+		if err := u.clock.Wait(ctx, delay); err != nil {
+			u.logger.Info("updater stopping", "error", err)
 			return err
 		}
 	}
@@ -254,6 +267,7 @@ func (u *ListUpdater) initialize(ctx context.Context) error {
 	var loadErr error
 	dirty := false
 	if u.config.Store != nil {
+		u.logger.Debug("loading snapshot")
 		loadCtx, cancel := context.WithTimeout(ctx, u.config.RequestTimeout)
 		loaded, err := LoadDatabase(loadCtx, u.config.Store, u.config.MaxSnapshotBytes)
 		cancel()
@@ -263,14 +277,19 @@ func (u *ListUpdater) initialize(ctx context.Context) error {
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			loadErr = err
 			if !errors.Is(err, ErrInvalidSnapshot) || errors.Is(err, ErrUnsupportedSnapshot) || errors.Is(err, ErrSnapshotTooLarge) {
+				u.logger.Error("snapshot load failed", "error", err)
 				u.mu.Lock()
 				u.status.LoadError = err
 				u.mu.Unlock()
 				return err
 			}
+			u.logger.Warn("snapshot invalid, discarding", "error", err)
 			dirty = true
 		} else if err == nil {
+			u.logger.Debug("snapshot loaded", "lists", len(loaded.lists))
 			db = loaded
+		} else {
+			u.logger.Debug("no snapshot found")
 		}
 	}
 	// The loaded database is still private here. Keep only selected lists and
@@ -305,6 +324,7 @@ func (u *ListUpdater) initialize(ctx context.Context) error {
 			u.status.Lists[i].NextAttempt = s.NextUpdate()
 		}
 	}
+	u.logger.Info("updater initialized", "ready", u.readyLocked())
 	return nil
 }
 
@@ -329,6 +349,7 @@ func (u *ListUpdater) cycle(ctx context.Context) error {
 	u.mu.Unlock()
 	var cycleErr error
 	if len(requests) != 0 {
+		u.logger.Debug("fetching lists", "count", len(requests))
 		callCtx, cancel := context.WithTimeout(ctx, u.config.RequestTimeout)
 		updates, err := u.config.API.BatchGetHashLists(callCtx, requests, u.config.SizeConstraints)
 		receivedAt := u.clock.Now()
@@ -341,6 +362,7 @@ func (u *ListUpdater) cycle(ctx context.Context) error {
 			err = validateUpdateBatch(requests, updates)
 		}
 		if err != nil {
+			u.logger.Debug("fetch cycle failed", "count", len(requests), "error", err)
 			var scoped *ListResponseError
 			scopedKnown := errors.As(err, &scoped)
 			if scopedKnown {
@@ -357,6 +379,7 @@ func (u *ListUpdater) cycle(ctx context.Context) error {
 			}
 			cycleErr = err
 		} else {
+			u.logger.Debug("fetch cycle complete", "count", len(requests))
 			for j, i := range indices {
 				update := updates[j]
 				if update.Metadata == nil {
@@ -389,6 +412,7 @@ func (u *ListUpdater) cycle(ctx context.Context) error {
 				s.LastError = nil
 				s.ConsecutiveFailures = 0
 				u.markDirtyLocked()
+				u.logger.Debug("list updated", "list", s.Name)
 			}
 		}
 		u.mu.Unlock()
@@ -438,6 +462,8 @@ func (u *ListUpdater) failLocked(i int, err error, now time.Time, invalidate boo
 	if next.After(s.NextAttempt) {
 		s.NextAttempt = next
 	}
+	u.logger.Warn("list update failed", "list", s.Name, "error", err,
+		"consecutiveFailures", s.ConsecutiveFailures, "nextAttempt", s.NextAttempt, "invalidated", invalidate)
 }
 
 func (u *ListUpdater) retryDelay(failures uint) time.Duration {
@@ -474,6 +500,7 @@ func (u *ListUpdater) save(ctx context.Context) error {
 	if !shouldSave {
 		return nil
 	}
+	u.logger.Debug("saving snapshot")
 	callCtx, cancel := context.WithTimeout(ctx, u.config.RequestTimeout)
 	err := u.db.Save(callCtx, u.config.Store)
 	cancel()
@@ -483,10 +510,16 @@ func (u *ListUpdater) save(ctx context.Context) error {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	if err != nil {
+		u.logger.Warn("snapshot save failed", "error", err, "consecutiveFailures", u.saveFailures+1)
 		u.status.PersistenceError = err
 		u.saveFailures++
 		u.status.NextSave = u.clock.Now().Add(u.retryDelay(u.saveFailures))
 		return err
+	}
+	if u.saveFailures > 0 {
+		u.logger.Info("snapshot save recovered", "previousFailures", u.saveFailures)
+	} else {
+		u.logger.Debug("snapshot saved")
 	}
 	u.status.PersistenceError = nil
 	u.status.Dirty = false

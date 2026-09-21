@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"mime"
 	"net/http"
@@ -47,6 +48,7 @@ type APIConfig struct {
 	UserAgent        string
 	MaxResponseBytes int64
 	MaxEntries       int
+	Logger           *slog.Logger // Defaults to slog.Default().
 }
 
 // HTTPAPI implements API using GET query parameters and binary protobuf
@@ -56,6 +58,7 @@ type HTTPAPI struct {
 	baseURL, key, userAgent string
 	maxBytes                int64
 	maxEntries              int
+	logger                  *slog.Logger
 }
 
 var _ API = (*HTTPAPI)(nil)
@@ -83,13 +86,17 @@ func NewHTTPAPI(c APIConfig) (*HTTPAPI, error) {
 	if c.UserAgent == "" {
 		c.UserAgent = "gosafe5"
 	}
+	if c.Logger == nil {
+		c.Logger = slog.Default()
+	}
 	client := http.Client{Timeout: 30 * time.Second}
 	if c.HTTPClient != nil {
 		client = *c.HTTPClient
 	}
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return &HTTPAPI{client: client, baseURL: strings.TrimRight(c.BaseURL, "/"), key: c.APIKey,
-		userAgent: c.UserAgent, maxBytes: c.MaxResponseBytes, maxEntries: c.MaxEntries}, nil
+		userAgent: c.UserAgent, maxBytes: c.MaxResponseBytes, maxEntries: c.MaxEntries,
+		logger: c.Logger.With("component", "gosafe5.api")}, nil
 }
 
 func (a *HTTPAPI) get(ctx context.Context, path string, q url.Values, result proto.Message) error {
@@ -101,6 +108,8 @@ func (a *HTTPAPI) get(ctx context.Context, path string, q url.Values, result pro
 	}
 	req.Header.Set("Accept", "application/x-protobuf")
 	req.Header.Set("User-Agent", a.userAgent)
+	start := time.Now()
+	a.logger.DebugContext(ctx, "API request", "method", req.Method, "path", path)
 	resp, err := a.client.Do(req)
 	if err != nil {
 		// net/http wraps transport errors in url.Error, whose URL contains key.
@@ -108,9 +117,11 @@ func (a *HTTPAPI) get(ctx context.Context, path string, q url.Values, result pro
 		if errors.As(err, &ue) {
 			err = ue.Err
 		}
+		a.logger.DebugContext(ctx, "API request failed", "path", path, "duration", time.Since(start), "error", err)
 		return fmt.Errorf("gosafe5: API transport: %w", err)
 	}
 	defer resp.Body.Close()
+	a.logger.DebugContext(ctx, "API response", "path", path, "status", resp.StatusCode, "duration", time.Since(start))
 	if resp.StatusCode != http.StatusOK {
 		return &HTTPError{resp.StatusCode, resp.Header.Get("Retry-After")}
 	}
@@ -167,6 +178,7 @@ func constraintQuery(c SizeConstraints) (url.Values, error) {
 }
 
 func (a *HTTPAPI) GetHashList(ctx context.Context, r HashListRequest, c SizeConstraints) (DatabaseUpdate, error) {
+	a.logger.DebugContext(ctx, "GetHashList", "list", r.Name)
 	if err := validListRequest(r); err != nil {
 		return DatabaseUpdate{}, err
 	}
@@ -179,16 +191,19 @@ func (a *HTTPAPI) GetHashList(ctx context.Context, r HashListRequest, c SizeCons
 	}
 	var response pb.HashList
 	if err := a.get(ctx, "/v5/hashList/"+r.Name, q, &response); err != nil {
+		a.logger.DebugContext(ctx, "GetHashList failed", "list", r.Name, "error", err)
 		return DatabaseUpdate{}, err
 	}
 	update, err := a.decodeList(r, &response)
 	if err != nil {
+		a.logger.DebugContext(ctx, "GetHashList decode failed", "list", r.Name, "error", err)
 		return DatabaseUpdate{}, &ListResponseError{Name: r.Name, Err: err}
 	}
 	return update, nil
 }
 
 func (a *HTTPAPI) BatchGetHashLists(ctx context.Context, requests []HashListRequest, c SizeConstraints) ([]DatabaseUpdate, error) {
+	a.logger.DebugContext(ctx, "BatchGetHashLists", "count", len(requests))
 	if len(requests) == 0 {
 		return nil, fmt.Errorf("%w: empty batch", ErrInvalidAPIRequest)
 	}
@@ -212,6 +227,7 @@ func (a *HTTPAPI) BatchGetHashLists(ctx context.Context, requests []HashListRequ
 	}
 	var response pb.BatchGetHashListsResponse
 	if err := a.get(ctx, "/v5/hashLists:batchGet", q, &response); err != nil {
+		a.logger.DebugContext(ctx, "BatchGetHashLists failed", "count", len(requests), "error", err)
 		return nil, err
 	}
 	if len(response.HashLists) != len(requests) {
@@ -221,6 +237,7 @@ func (a *HTTPAPI) BatchGetHashLists(ctx context.Context, requests []HashListRequ
 	for i, r := range requests {
 		updates[i], err = a.decodeList(r, response.HashLists[i])
 		if err != nil {
+			a.logger.DebugContext(ctx, "BatchGetHashLists decode failed", "list", r.Name, "error", err)
 			return nil, &ListResponseError{Name: r.Name, Err: err}
 		}
 	}
@@ -228,6 +245,7 @@ func (a *HTTPAPI) BatchGetHashLists(ctx context.Context, requests []HashListRequ
 }
 
 func (a *HTTPAPI) ListHashLists(ctx context.Context, r ListHashListsRequest) (HashListsPage, error) {
+	a.logger.DebugContext(ctx, "ListHashLists", "pageSize", r.PageSize)
 	if r.PageSize < 0 {
 		return HashListsPage{}, fmt.Errorf("%w: negative page size", ErrInvalidAPIRequest)
 	}
@@ -240,6 +258,7 @@ func (a *HTTPAPI) ListHashLists(ctx context.Context, r ListHashListsRequest) (Ha
 	}
 	var response pb.ListHashListsResponse
 	if err := a.get(ctx, "/v5/hashLists", q, &response); err != nil {
+		a.logger.DebugContext(ctx, "ListHashLists failed", "error", err)
 		return HashListsPage{}, err
 	}
 	page := HashListsPage{NextPageToken: response.NextPageToken}
@@ -263,6 +282,7 @@ func (a *HTTPAPI) ListHashLists(ctx context.Context, r ListHashListsRequest) (Ha
 }
 
 func (a *HTTPAPI) SearchHashes(ctx context.Context, prefixes []Prefix4) (HashSearchResult, error) {
+	a.logger.DebugContext(ctx, "SearchHashes", "prefixes", len(prefixes))
 	if len(prefixes) == 0 || len(prefixes) > 1000 {
 		return HashSearchResult{}, fmt.Errorf("%w: expected 1–1000 prefixes", ErrInvalidAPIRequest)
 	}
@@ -276,6 +296,7 @@ func (a *HTTPAPI) SearchHashes(ctx context.Context, prefixes []Prefix4) (HashSea
 	}
 	var response pb.SearchHashesResponse
 	if err := a.get(ctx, "/v5/hashes:search", q, &response); err != nil {
+		a.logger.DebugContext(ctx, "SearchHashes failed", "prefixes", len(prefixes), "error", err)
 		return HashSearchResult{}, err
 	}
 	duration, err := decodeDuration(response.CacheDuration)
