@@ -11,14 +11,21 @@ This is not an official client.
 - Safe Browsing v4 is being deprecated.
 - In practice, I've ran into cases where the v4 online API returns false negatives while v5 online API returns the correct verdict. It seems that v5 matches "transparencyreport.google.com/safe-browsing" results better than v4.
 
-## Project status
-- [x] Stateless primitives: URL hashing, Rice encoding/decoding, hash list management.
-- [x] In-memory local database: named lists, versioned updates, metadata, lookup, and update timing.
-- [x] Snapshot persistence with a pluggable backend and filesystem implementation.
-- [x] Mockable v5 API layer: protobuf transport, list discovery/downloads, and hash-prefix searches.
-- [x] Managed lists: background synchronization, retry/recovery, health, and automatic persistence.
-- [x] URL checking with local-list and real-time modes, shared prefix-response caching, and a JSON `/v5/urls:search` server.
+## Usage
 
+`cmd/sbserver` runs an HTTP server backed by a local threat database, which is synced with Google's safe browsing API database. 
+Run with `-h` to see all flags.
+
+The server exposes the following endpoints:
+- `GET /v5/urls:search?urls=...&mode=...` checks URLs against the threat
+  database. `mode` is optional.
+
+If `mode` is supplied, the endpoint will use the specified mode for the request. If not supplied, it will use the default mode specified by the `-mode` flag. [`local-list`](https://developers.google.com/safe-browsing/reference/Local.List.Mode)
+and [`real-time`](https://developers.google.com/safe-browsing/reference/Real.Time.Mode) are supported.
+
+```sh
+./sbserver -snapshot ./safebrowsing.snapshot
+```
 
 ## Development
 
@@ -27,17 +34,10 @@ Requires Go 1.24.5 or later.
 Private generated protobuf types are checked in. To regenerate them, install
 `protoc` 29.3 and `protoc-gen-go` v1.35.1, then run `go generate ./internal/sbproto`.
 
-### Server
-
-Set `SAFE_BROWSING_API_KEY` in the environment, then run:
-
-```sh
-go run ./cmd/sbserver -snapshot ./safebrowsing.snapshot
-```
-
 ## Protocol references
 
 - [URLs and hashing](https://developers.google.com/safe-browsing/reference/URLs.and.Hashing)
 - [HashList and Rice messages](https://developers.google.com/safe-browsing/reference/rest/v5/hashList)
 - [Local database and encoding example](https://developers.google.com/safe-browsing/reference/Local.Database)
 - [Local List Mode](https://developers.google.com/safe-browsing/reference/Local.List.Mode)
+- [Real Time Mode](https://developers.google.com/safe-browsing/reference/Real.Time.Mode)
