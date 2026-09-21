@@ -16,6 +16,9 @@ This is not an official client.
 `cmd/sbserver` runs an HTTP server backed by a local threat database, which is synced with Google's safe browsing API database. 
 Run with `-h` to see all flags.
 
+A Safe Browsing API key is required, via `-api-key` or the
+`SAFE_BROWSING_API_KEY` environment variable (`-api-key` takes precedence).
+
 The server exposes the following endpoints:
 - `GET /v5/urls:search?urls=...&mode=...` checks URLs against the threat
   database. `mode` is optional.
@@ -24,7 +27,7 @@ If `mode` is supplied, the endpoint will use the specified mode for the request.
 and [`real-time`](https://developers.google.com/safe-browsing/reference/Real.Time.Mode) are supported.
 
 ```sh
-./sbserver -snapshot ./safebrowsing.snapshot
+SAFE_BROWSING_API_KEY=... ./sbserver -snapshot ./safebrowsing.snapshot
 ```
 
 ## Development

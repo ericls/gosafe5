@@ -24,7 +24,8 @@ func main() {
 		fmt.Fprint(out, `sbserver runs an HTTP server backed by a synchronized local
 threat database.
 
-Requires the SAFE_BROWSING_API_KEY environment variable to be set.
+Requires a Safe Browsing API key, via -api-key or the
+SAFE_BROWSING_API_KEY environment variable. -api-key takes precedence.
 
 Usage:
   sbserver [flags]
@@ -34,6 +35,7 @@ Flags:
 		flag.PrintDefaults()
 	}
 	listen := flag.String("listen", "127.0.0.1:8080", "HTTP listen address")
+	apiKey := flag.String("api-key", "", "Safe Browsing API key; overrides SAFE_BROWSING_API_KEY")
 	mode := flag.String("mode", string(sb.ModeLocalList), "default mode: local-list or real-time")
 	names := flag.String("threat-lists", "mw-4b,se-4b,uws-4b", "comma-separated documented threat list names")
 	snapshot := flag.String("snapshot", "", "optional snapshot file (parent directory must exist)")
@@ -61,7 +63,11 @@ Flags:
 		logger.Error(err.Error())
 		os.Exit(1)
 	}
-	api, err := sb.NewHTTPAPI(sb.APIConfig{APIKey: os.Getenv("SAFE_BROWSING_API_KEY"), Logger: logger})
+	key := *apiKey
+	if key == "" {
+		key = os.Getenv("SAFE_BROWSING_API_KEY")
+	}
+	api, err := sb.NewHTTPAPI(sb.APIConfig{APIKey: key, Logger: logger})
 	if err != nil {
 		logger.Error(err.Error())
 		os.Exit(1)
