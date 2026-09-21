@@ -181,7 +181,11 @@ func (a *HTTPAPI) GetHashList(ctx context.Context, r HashListRequest, c SizeCons
 	if err := a.get(ctx, "/v5/hashList/"+r.Name, q, &response); err != nil {
 		return DatabaseUpdate{}, err
 	}
-	return a.decodeList(r, &response)
+	update, err := a.decodeList(r, &response)
+	if err != nil {
+		return DatabaseUpdate{}, &ListResponseError{Name: r.Name, Err: err}
+	}
+	return update, nil
 }
 
 func (a *HTTPAPI) BatchGetHashLists(ctx context.Context, requests []HashListRequest, c SizeConstraints) ([]DatabaseUpdate, error) {
@@ -217,7 +221,7 @@ func (a *HTTPAPI) BatchGetHashLists(ctx context.Context, requests []HashListRequ
 	for i, r := range requests {
 		updates[i], err = a.decodeList(r, response.HashLists[i])
 		if err != nil {
-			return nil, err
+			return nil, &ListResponseError{Name: r.Name, Err: err}
 		}
 	}
 	return updates, nil

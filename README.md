@@ -16,7 +16,7 @@ This is not an official client.
 - [x] In-memory local database: named lists, versioned updates, metadata, lookup, and update timing.
 - [x] Snapshot persistence with a pluggable backend and filesystem implementation.
 - [x] Mockable v5 API layer: protobuf transport, list discovery/downloads, and hash-prefix searches.
-- [ ] Background synchronization.
+- [x] Managed lists: background synchronization, retry/recovery, health, and automatic persistence.
 - [ ] HTTP server: serving `/v5/urls:search` endpoints, with JSON support. (JSON is not supported in from `https://safebrowsing.googleapis.com/v5/urls:search` yet.)
 
 ## Development

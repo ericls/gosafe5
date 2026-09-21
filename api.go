@@ -2,8 +2,19 @@ package gosafe5
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
+
+// ListResponseError identifies a list whose response could not be decoded.
+// Name is the requested name, not an untrusted response name.
+type ListResponseError struct {
+	Name string
+	Err  error
+}
+
+func (e *ListResponseError) Error() string { return fmt.Sprintf("list %q: %v", e.Name, e.Err) }
+func (e *ListResponseError) Unwrap() error { return e.Err }
 
 // API is the mockable Safe Browsing service boundary. Implementations return
 // decoded domain values; callers need not depend on HTTP or protobuf types.

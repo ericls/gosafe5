@@ -28,6 +28,10 @@ type SnapshotStore interface {
 // ErrInvalidSnapshot identifies an unsupported, malformed, or corrupt snapshot.
 var ErrInvalidSnapshot = errors.New("gosafe5: invalid database snapshot")
 
+// ErrUnsupportedSnapshot identifies a format or version this package cannot
+// read. It also matches ErrInvalidSnapshot, but must not trigger an overwrite.
+var ErrUnsupportedSnapshot = fmt.Errorf("%w: unsupported format or version", ErrInvalidSnapshot)
+
 // ErrSnapshotTooLarge means loading exceeded the caller's encoded byte limit.
 var ErrSnapshotTooLarge = errors.New("gosafe5: snapshot exceeds size limit")
 
@@ -121,7 +125,8 @@ func LoadDatabase(ctx context.Context, store SnapshotStore, maxBytes int64) (*Lo
 }
 
 func decodeDatabase(ctx context.Context, r io.Reader, maxBytes int64) (*LocalDatabase, error) {
-	limited := &io.LimitedReader{R: contextReader{ctx, r}, N: maxBytes}
+	input := &snapshotReader{Reader: contextReader{ctx, r}}
+	limited := &io.LimitedReader{R: input, N: maxBytes}
 	dec := json.NewDecoder(limited)
 	var snapshot persistedSnapshot
 	if err := dec.Decode(&snapshot); err != nil {
@@ -131,7 +136,7 @@ func decodeDatabase(ctx context.Context, r io.Reader, maxBytes int64) (*LocalDat
 		if limited.N == 0 {
 			return nil, ErrSnapshotTooLarge
 		}
-		return nil, fmt.Errorf("%w: %w", ErrInvalidSnapshot, err)
+		return nil, snapshotDecodeError(err, input.err)
 	}
 	// Require exactly one document; include trailing whitespace in the limit.
 	var extra any
@@ -140,7 +145,7 @@ func decodeDatabase(ctx context.Context, r io.Reader, maxBytes int64) (*LocalDat
 			return nil, ctx.Err()
 		}
 		if err != nil {
-			return nil, fmt.Errorf("%w: trailing data: %w", ErrInvalidSnapshot, err)
+			return nil, snapshotDecodeError(err, input.err)
 		}
 		return nil, fmt.Errorf("%w: trailing data", ErrInvalidSnapshot)
 	}
@@ -157,8 +162,11 @@ func decodeDatabase(ctx context.Context, r io.Reader, maxBytes int64) (*LocalDat
 			return nil, err
 		}
 	}
-	if snapshot.Format != "gosafe5" || snapshot.Version != 1 || snapshot.Lists == nil {
-		return nil, fmt.Errorf("%w: unsupported format or missing lists", ErrInvalidSnapshot)
+	if snapshot.Format != "gosafe5" || snapshot.Version != 1 {
+		return nil, ErrUnsupportedSnapshot
+	}
+	if snapshot.Lists == nil {
+		return nil, fmt.Errorf("%w: missing lists", ErrInvalidSnapshot)
 	}
 	db := &LocalDatabase{}
 	for _, l := range snapshot.Lists {
@@ -187,6 +195,27 @@ func decodeDatabase(ctx context.Context, r io.Reader, maxBytes int64) (*LocalDat
 		return nil, err
 	}
 	return db, nil
+}
+
+// Keep backend read failures distinguishable from malformed snapshot data.
+func snapshotDecodeError(err, readErr error) error {
+	if readErr != nil {
+		return readErr
+	}
+	return fmt.Errorf("%w: %w", ErrInvalidSnapshot, err)
+}
+
+type snapshotReader struct {
+	io.Reader
+	err error
+}
+
+func (r *snapshotReader) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	if err != nil && err != io.EOF {
+		r.err = err
+	}
+	return n, err
 }
 
 type contextReader struct {

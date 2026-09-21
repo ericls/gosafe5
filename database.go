@@ -71,6 +71,19 @@ type LocalDatabase struct {
 	lists  map[string]ListState
 }
 
+// Invalidate removes a list only if its current version equals expectedVersion.
+// An absent list matches an empty expectedVersion. Previously returned snapshots
+// remain immutable, but are no longer evidence of usable database state.
+func (db *LocalDatabase) Invalidate(name string, expectedVersion []byte) error {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	if !bytes.Equal(db.lists[name].Version, expectedVersion) {
+		return fmt.Errorf("%w: %s", ErrVersionMismatch, name)
+	}
+	delete(db.lists, name)
+	return nil
+}
+
 // Get returns a detached snapshot, or false when name has not been loaded.
 func (db *LocalDatabase) Get(name string) (ListState, bool) {
 	db.mu.RLock()
